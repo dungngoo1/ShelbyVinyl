@@ -1,0 +1,250 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  BANNED
+  PENDING
+}
+
+enum WalletProvider {
+  PETRA
+}
+
+enum UploadSource {
+  WEB
+  ADMIN
+  SEED
+}
+
+enum TrackVisibility {
+  PUBLIC
+  UNLISTED
+  PRIVATE
+}
+
+enum TrackStatus {
+  DRAFT
+  PROCESSING
+  PUBLISHED
+  BLOCKED
+  DELETED
+  FAILED
+}
+
+enum AssetType {
+  AUDIO
+  COVER_IMAGE
+  WAVEFORM
+  LYRICS
+}
+
+enum AssetStatus {
+  PENDING
+  READY
+  FAILED
+  DELETED
+}
+
+enum ReportReason {
+  COPYRIGHT
+  NSFW
+  SPAM
+  ABUSE
+  OTHER
+}
+
+enum ReportStatus {
+  OPEN
+  REVIEWING
+  RESOLVED
+  REJECTED
+}
+
+enum ModerationActionType {
+  FEATURED
+  UNFEATURED
+  BLOCKED
+  UNBLOCKED
+  DELETED
+  RESTORED
+  USER_BANNED
+  USER_UNBANNED
+}
+
+model User {
+  id                String             @id @default(cuid())
+  email             String?            @unique
+  username          String             @unique
+  displayName       String
+  bio               String?
+  avatarUrl         String?
+  aptosAddress      String?            @unique
+  walletProvider    WalletProvider?
+  role              UserRole           @default(USER)
+  status            UserStatus         @default(ACTIVE)
+  faucetClaimCount  Int                @default(0)
+  lastFaucetClaimAt DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  sessions          UserSession[]
+  tracks            Track[]
+  likes             TrackLike[]
+  downloads         TrackDownload[]
+  reportsCreated    TrackReport[]      @relation("TrackReportReporter")
+  moderationActions ModerationAction[] @relation("ModerationActionActor")
+}
+
+model UserSession {
+  id              String   @id @default(cuid())
+  userId          String
+  refreshToken    String   @unique
+  ipAddress       String?
+  userAgent       String?
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Track {
+  id                    String           @id @default(cuid())
+  ownerUserId           String
+  slug                  String           @unique
+  title                 String
+  artistName            String
+  albumName             String?
+  description           String?
+  genre                 String?
+  tags                  String[]         @default([])
+  visibility            TrackVisibility  @default(PUBLIC)
+  status                TrackStatus      @default(PROCESSING)
+  durationSeconds       Int?
+  fileSizeBytes         BigInt?
+  mimeType              String?
+  coverImageUrl         String?
+  waveformJsonUrl       String?
+  isFeatured            Boolean          @default(false)
+  playCount             Int              @default(0)
+  downloadCount         Int              @default(0)
+  likeCount             Int              @default(0)
+  source                UploadSource     @default(WEB)
+  publishedAt           DateTime?
+  shelbyNamespace       String?
+  shelbyOwnerAddress    String?
+  audioBlobName         String?
+  audioBlobVersion      String?
+  explorerUrl           String?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  deletedAt             DateTime?
+
+  owner             User               @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  assets            TrackAsset[]
+  likes             TrackLike[]
+  downloads         TrackDownload[]
+  reports           TrackReport[]
+  moderationActions ModerationAction[]
+
+  @@index([ownerUserId, createdAt])
+  @@index([visibility, status, publishedAt])
+  @@index([isFeatured, publishedAt])
+  @@index([genre])
+}
+
+model TrackAsset {
+  id                 String      @id @default(cuid())
+  trackId            String
+  type               AssetType
+  status             AssetStatus @default(PENDING)
+  originalFilename   String?
+  contentType        String?
+  sizeBytes          BigInt?
+  checksumSha256     String?
+  shelbyNamespace    String?
+  shelbyOwnerAddress String?
+  blobName           String?
+  blobVersion        String?
+  explorerUrl        String?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  track Track @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  @@index([trackId, type])
+}
+
+model TrackLike {
+  id        String   @id @default(cuid())
+  trackId    String
+  userId     String
+  createdAt  DateTime @default(now())
+
+  track Track @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([trackId, userId])
+  @@index([userId, createdAt])
+}
+
+model TrackDownload {
+  id          String   @id @default(cuid())
+  trackId      String
+  userId       String?
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+
+  track Track @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  user  User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([trackId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model TrackReport {
+  id             String       @id @default(cuid())
+  trackId        String
+  reporterUserId String?
+  reason         ReportReason
+  note           String?
+  status         ReportStatus @default(OPEN)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  track    Track @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  reporter User? @relation("TrackReportReporter", fields: [reporterUserId], references: [id], onDelete: SetNull)
+
+  @@index([trackId, status])
+  @@index([reporterUserId, createdAt])
+}
+
+model ModerationAction {
+  id           String               @id @default(cuid())
+  trackId       String?
+  actorUserId   String?
+  actionType    ModerationActionType
+  note          String?
+  createdAt     DateTime             @default(now())
+
+  track Track? @relation(fields: [trackId], references: [id], onDelete: SetNull)
+  actor User?  @relation("ModerationActionActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([trackId, createdAt])
+  @@index([actorUserId, createdAt])
+}
